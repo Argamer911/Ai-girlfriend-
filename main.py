@@ -1,7 +1,7 @@
 import random
 import os
 from pyrogram import Client, filters
-from pyrogram.types import Message
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from openai import OpenAI
 
 # ================= CONFIG =================
@@ -11,17 +11,20 @@ API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-app = Client("ai-bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app = Client("ai-gf-bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 ai = OpenAI(api_key=OPENAI_API_KEY)
 
 SYSTEM_PROMPT = """
-You are a fun, romantic, playful Telegram bot.
-Reply short, natural, Gen-Z style.
-No long paragraphs.
-Make it entertaining.
+You are a cute, romantic, playful AI girlfriend.
+Reply short.
+Speak Hindi in English letters.
+Be fun and engaging.
 """
 
-# ================= AI FUNCTION =================
+# ================= MEMORY + LEADERBOARD =================
+
+user_memory = {}
+leaderboard = {}
 
 async def ai_reply(prompt):
     response = ai.chat.completions.create(
@@ -33,98 +36,106 @@ async def ai_reply(prompt):
     )
     return response.choices[0].message.content
 
-# ================= JOKE =================
+# ================= START WITH BUTTONS =================
+
+@app.on_message(filters.command("start"))
+async def start(client, message: Message):
+
+    text = """
+💖 𝐀𝐈 𝐆𝐢𝐫𝐥𝐟𝐫𝐢𝐞𝐧𝐝 💖
+
+Hey baby 😘  
+Main tumhari AI girlfriend hoon 💕
+
+Neeche se choose karo 👇
+"""
+
+    buttons = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("💘 Love %", switch_inline_query_current_chat="/love")
+        ],
+        [
+            InlineKeyboardButton("😂 Joke", switch_inline_query_current_chat="/joke"),
+            InlineKeyboardButton("🤫 Truth", switch_inline_query_current_chat="/truth")
+        ],
+        [
+            InlineKeyboardButton("🔥 Dare", switch_inline_query_current_chat="/dare")
+        ],
+        [
+            InlineKeyboardButton("🏆 Leaderboard", switch_inline_query_current_chat="/leaderboard")
+        ]
+    ])
+
+    await message.reply(text, reply_markup=buttons)
+
+# ================= AI COMMANDS =================
 
 @app.on_message(filters.command("joke"))
 async def joke(client, message: Message):
-    text = await ai_reply("Ek funny romantic joke bolo")
-    await message.reply(text)
-
-# ================= TRUTH =================
+    reply = await ai_reply("Ek funny romantic joke bolo")
+    await message.reply(reply)
 
 @app.on_message(filters.command("truth"))
 async def truth(client, message: Message):
-    text = await ai_reply("Ek interesting truth question pucho group game ke liye")
-    await message.reply(text)
-
-# ================= DARE =================
+    reply = await ai_reply("Ek interesting truth question pucho")
+    await message.reply(reply)
 
 @app.on_message(filters.command("dare"))
 async def dare(client, message: Message):
-    text = await ai_reply("Ek funny dare do group ke liye")
-    await message.reply(text)
-
-# ================= LOVE % =================
+    reply = await ai_reply("Ek funny dare do")
+    await message.reply(reply)
 
 @app.on_message(filters.command("love"))
 async def love(client, message: Message):
-    if not message.reply_to_message:
-        return await message.reply("Reply karke use karo 😅")
-
-    user1 = message.from_user.first_name
-    user2 = message.reply_to_message.from_user.first_name
-
     percent = random.randint(1, 100)
+    explanation = await ai_reply(f"Love percentage {percent}% hai. Ek cute line bolo.")
+    await message.reply(f"💖 Love: {percent}%\n{explanation}")
 
-    explanation = await ai_reply(
-        f"{user1} aur {user2} ka love percentage {percent}% hai. Ek cute funny line bolo."
-    )
+# ================= LEADERBOARD =================
 
-    await message.reply(f"💖 Love: {percent}%\n\n{explanation}")
+@app.on_message(filters.command("leaderboard"))
+async def show_leaderboard(client, message: Message):
 
-# ================= SLAP =================
+    if not leaderboard:
+        return await message.reply("Abhi tak koi top lover nahi bana 😅")
 
-@app.on_message(filters.command("slap"))
-async def slap(client, message: Message):
-    if not message.reply_to_message:
-        return await message.reply("Reply karo kisi ko 😤")
+    sorted_users = sorted(leaderboard.items(), key=lambda x: x[1], reverse=True)[:10]
 
-    user1 = message.from_user.mention
-    user2 = message.reply_to_message.from_user.mention
+    text = "🏆 Top 10 Lovers 💕\n\n"
+    for i, (user_id, count) in enumerate(sorted_users, 1):
+        user = await app.get_users(user_id)
+        text += f"{i}. {user.first_name} — {count} msgs\n"
 
-    text = await ai_reply(f"{user1} ne {user2} ko funny style me slap kiya. Ek dramatic line bolo.")
     await message.reply(text)
 
-# ================= HUG =================
+# ================= AI CHAT (PRIVATE + GROUP SUPPORT) =================
 
-@app.on_message(filters.command("hug"))
-async def hug(client, message: Message):
-    if not message.reply_to_message:
-        return await message.reply("Reply karo kisi ko 🤗")
+@app.on_message(filters.text & ~filters.command(
+    ["start", "joke", "truth", "dare", "love", "leaderboard"]
+))
+async def chat(client, message: Message):
 
-    user1 = message.from_user.mention
-    user2 = message.reply_to_message.from_user.mention
+    if not message.from_user:
+        return
 
-    text = await ai_reply(f"{user1} ne {user2} ko cute hug diya. Ek sweet line bolo.")
-    await message.reply(text)
+    user_id = message.from_user.id
 
-# ================= KISS =================
+    # Group me sirf mention ya reply pe bolega
+    if message.chat.type != "private":
+        me = await app.get_me()
+        if not (message.mentioned or 
+                (message.reply_to_message and 
+                 message.reply_to_message.from_user and 
+                 message.reply_to_message.from_user.id == me.id)):
+            return
 
-@app.on_message(filters.command("kiss"))
-async def kiss(client, message: Message):
-    if not message.reply_to_message:
-        return await message.reply("Reply karo kisi ko 😘")
+    # Leaderboard count
+    leaderboard[user_id] = leaderboard.get(user_id, 0) + 1
 
-    user1 = message.from_user.mention
-    user2 = message.reply_to_message.from_user.mention
+    reply = await ai_reply(message.text)
+    await message.reply(reply)
 
-    text = await ai_reply(f"{user1} ne {user2} ko cute kiss diya. Ek romantic funny line bolo.")
-    await message.reply(text)
+# ================= RUN =================
 
-# ================= DIVORCE =================
-
-@app.on_message(filters.command("divorce"))
-async def divorce(client, message: Message):
-    if not message.reply_to_message:
-        return await message.reply("Reply karo jis se divorce lena hai 💔")
-
-    user1 = message.from_user.mention
-    user2 = message.reply_to_message.from_user.mention
-
-    text = await ai_reply(f"{user1} ne {user2} se funny dramatic divorce liya. Ek savage line bolo.")
-    await message.reply(text)
-
-# ================= START =================
-
-print("Bot Started 🚀")
+print("AI Girlfriend Bot Running 💖")
 app.run()
